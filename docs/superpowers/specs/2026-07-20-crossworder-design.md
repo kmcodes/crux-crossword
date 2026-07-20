@@ -15,30 +15,69 @@ Licensing posture: personal use only, so scraped published-clue corpora (xd corp
 
 ## Data sources (all free)
 
-Clues and answers:
+All source facts below were verified by download and inspection on 2026-07-20.
 
-1. **xd corpus** (xd.saul.pw) — ~7M clue-answer pairs from decades of published puzzles (NYT, LA Times, WSJ, Universal, and more), TSV download. Each row carries publication and date. Primary clue bank.
-2. **Peter Broda's Wordlist** — ~400k answers scored 0–100 for fill quality. Primary fill wordlist.
-3. **Spread the Wordlist** (Husic/Henestroza) — ~120k curated scored entries, modern vocabulary. Merged with Broda.
-4. **Collaborative Word List** (Crossword Nexus, GitHub) — additional open scoring signal.
+Primary source — **xd-puzzles.zip** (https://xd.saul.pw/xd-puzzles.zip, 93MB):
+the single most important correction to the original plan. The xd website
+describes this archive as "over 6000 pre-1965 New York Times crossword puzzles",
+but it actually contains **89,662 puzzles across 33 publications**, extracted to
+a `gxd/<publication>/<year>/` tree. NYT coverage is **28,337 puzzles spanning
+1942–2025**, of which **11,688 are Shortz-era (1994+)**.
 
-Grid designs:
+Each `.xd` file is plain text containing everything needed in one place: a
+`Date:` header, the black-square grid as ASCII rows (`#` = black), and every
+clue paired to its answer as `A1. Clue text ~ ANSWER`. This yields grids,
+clues, and weekday from a single parse.
 
-5. Black-square layouts extracted from xd corpus puzzles — thousands of real, proven, symmetric 15x15 and 21x21 patterns. No grid invention needed.
+Measured Friday/Saturday (hard) inventory, Shortz era:
+- 3,339 Fri/Sat puzzles
+- **231,063 Fri/Sat clue-answer pairs** over 71,328 distinct answers
+- **2,906 distinct real 15x15 Fri/Sat black-square patterns** (themeless, wide open)
 
-Difficulty signal:
+Fill wordlists (both format `WORD;score`, score 0–100):
+- **Collaborative Word List** — https://raw.githubusercontent.com/Crossword-Nexus/collaborative-word-list/main/xwordlist.dict — 566,665 valid entries, **MIT licensed**.
+- **Spread the Wordlist** — https://drive.google.com/uc?export=download&id=1f0XZ0xRJ37UdxbLsmckYqUJUf_R7pQcs (linked from spreadthewordlist.com) — 315,899 valid entries, **CC BY-NC-SA 4.0** (non-commercial; acceptable for personal use, blocks commercial release).
 
-6. NYT clues in the xd corpus carry a date, hence a weekday; NYT difficulty ramps Monday→Saturday. Filtering to Friday/Saturday clues yields a hard-clue bank. Clue-answer pairing rarity across the corpus is a second hardness signal.
+Merged and filtered to score >= 50: **285,536 usable fill entries**, with good
+coverage at every length including 17,213 fifteen-letter entries (needed for
+themeless spanners).
 
-Bonus: the app can import `.puz` files, so free indie puzzles (e.g., Crosshare) are also playable.
+**Not used, and why:**
+- *xd-clues.zip* (8M rows) was the originally specified clue source, but its schema is only `pubid, year, answer, clue` — **no date, no weekday, and no puzzle ID**. Weekday-based difficulty filtering is therefore impossible from this file, and clues cannot be joined back to puzzles. Superseded by parsing `.xd` files directly.
+- *xd-metadata.zip* `puzzles.tsv` contains metadata only (xdid, date, size, title, author) — **no grid layouts**. Cannot supply grid patterns.
+- *Peter Broda's Wordlist* — the domain `peterbroda.me` is **unreachable as of 2026-07-20** (connection fails, not merely a moved path). Dropped; the two wordlists above cover the need.
+
+Difficulty signal: NYT difficulty ramps Monday→Saturday, so restricting to
+Friday/Saturday Shortz-era puzzles yields the hard clue bank. Answer obscurity
+(inverse frequency across the full corpus) is a second hardness signal.
+
+Bonus: the app can import `.puz` files, so free indie puzzles are also playable.
+
+## Critical constraint: fill must be clue-aware
+
+Measured overlap between the score>=50 wordlist and the Fri/Sat clue bank is
+**56,632 answers** (avg 3.5 hard clues each) — only about 20% of the 285,536
+fillable entries have a Friday/Saturday clue available.
+
+This drives a core design decision: **the filler must draw candidates from the
+clue-covered set, not from the full wordlist.** A filler that optimises purely
+for fill score will produce grids full of answers that have no hard clue, forcing
+either weak clues or unclued slots. The candidate pool is therefore
+`wordlist(score>=50) ∩ clue_bank`, with the full wordlist used only as a
+last-resort fallback for otherwise-unfillable slots (such answers then draw
+clues from the wider non-Fri/Sat corpus and are penalised in difficulty scoring).
+
+Overlap is thinnest at lengths 11–14 (2,058 / 516 / 623 / 243 entries) and
+notably better at 15 (2,127). Grid patterns whose slot-length profile demands
+many 12–14 letter answers should be deprioritised during pattern selection.
 
 ## Generation pipeline (Python, desktop)
 
-1. **Ingest** — one-time download of xd corpus + wordlists into local SQLite: `clues(answer, clue, source, date, weekday)`, `words(answer, score)`. Dedupe, uppercase, strip non A–Z answers.
-2. **Grid pick** — sample a real black-square pattern from extracted xd layouts (15x15 default, 21x21 sometimes). Enforce symmetry, connectivity, minimum 3-letter words.
-3. **Fill** — backtracking search: most-constrained slot first; candidates come from the merged wordlist indexed by letter pattern; prefer high fill score and answers present in the clue bank. Retry with a new grid on dead ends. 21x21 runs as overnight batch.
-4. **Clue assignment** — per answer, choose from the clue bank. Hard mode prefers Fri/Sat-sourced clues and rare clue-answer pairings; never pick a clue containing its answer.
-5. **Difficulty scoring 1–5** — combination of average weekday of chosen clues, average answer obscurity (inverse corpus frequency), share of long answers, grid openness.
+1. **Ingest** — download `xd-puzzles.zip` and both wordlists once; parse the `gxd/nytimes/**` tree into local SQLite: `clues(answer, clue, weekday, year, is_hard)`, `words(answer, score)`, `grids(pattern, size, source_date)`. Dedupe, uppercase, strip non A–Z answers.
+2. **Grid pick** — sample a real black-square pattern from the 2,906 extracted Fri/Sat layouts (15x15 default; 21x21 sourced from Sunday grids). Patterns come from published puzzles so symmetry and connectivity are inherent, but are re-validated on ingest; files with irregular row counts (a small minority) are rejected.
+3. **Fill** — backtracking search: most-constrained slot first; candidates from the clue-covered pool described above, indexed by letter pattern; prefer high fill score. Retry with a new grid on dead ends. 21x21 runs as overnight batch.
+4. **Clue assignment** — per answer, choose from the clue bank, preferring Fri/Sat-sourced clues and rarer clue-answer pairings; never pick a clue containing its own answer. Note that clues referring to a grid position ("See 17-Across") or to a puzzle theme are meaningless out of context and must be filtered out at ingest.
+5. **Difficulty scoring 1–5** — combination of share of clues sourced from Fri/Sat, average answer obscurity (inverse corpus frequency), share of long answers, grid openness, and a penalty for fallback answers clued from outside the hard bank.
 6. **Export** — `puzzles.sqlite` with grid, solution, clues, difficulty, size; batches of 500+. Also emit `.puz`-compatible JSON.
 7. **Curation (optional)** — CLI preview to reject bad fills before export.
 
