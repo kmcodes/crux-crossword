@@ -36,6 +36,26 @@ def test_is_usable_clue_rejects_cross_references():
     assert is_usable_clue("   ") is False
 
 
+def test_is_usable_clue_rejects_space_separated_cross_references():
+    assert is_usable_clue("See 63 Down") is False
+    assert is_usable_clue("Info on 37 Across") is False
+    assert is_usable_clue("Alternative name for 21 Across") is False
+    assert (
+        is_usable_clue(
+            '"And Then There Were None" director, with 12 Down'
+        )
+        is False
+    )
+
+
+def test_is_usable_clue_accepts_legitimate_digit_clues():
+    assert is_usable_clue("1980s dance") is True
+    assert is_usable_clue("Catch-22") is True
+    assert is_usable_clue("3-D movie") is True
+    assert is_usable_clue("W-2 form") is True
+    assert is_usable_clue("Apollo 11 org.") is True
+
+
 def test_build_corpus_populates_tables(tmp_path: Path):
     pdir = tmp_path / "gxd" / "nytimes" / "2015"
     pdir.mkdir(parents=True)

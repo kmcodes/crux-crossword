@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS grids (
 );
 """
 
-CROSSREF_RE = re.compile(r"\b\d+-(Across|Down)\b", re.IGNORECASE)
+CROSSREF_RE = re.compile(r"\b\d+[\s-]+(Across|Down)\b", re.IGNORECASE)
 
 # The hard-difficulty bank (Shortz-era Fri/Sat) is scoped to NYT puzzles only
 # -- xdparse.is_hard() has no notion of publisher, so that restriction is
