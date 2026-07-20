@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import random
+import re
 import sqlite3
 from collections import defaultdict
 from pathlib import Path
@@ -19,6 +20,7 @@ class ClueBank:
         self._hard = hard
         self._easy = easy
         self._frequency = frequency
+        self._patterns: dict[str, re.Pattern[str]] = {}
 
     @classmethod
     def load(cls, db_path: Path) -> "ClueBank":
@@ -37,11 +39,30 @@ class ClueBank:
     def frequency(self, answer: str) -> int:
         return self._frequency.get(answer, 0)
 
+    def _giveaway_pattern(self, answer: str) -> re.Pattern[str]:
+        """Cached whole-word matcher for one answer.
+
+        pick() runs once per slot (~80 per puzzle) over hundreds of puzzles,
+        so the compiled patterns are cached rather than rebuilt per call.
+        """
+        pattern = self._patterns.get(answer)
+        if pattern is None:
+            # Word boundaries only: a plain substring test discards good clues
+            # whose answer merely sits inside a longer word — measured on the
+            # real corpus, "Generation or more" was rejected for ERA and
+            # "Switch positions" for ONS, with no genuine leak among them.
+            # Hyphens and apostrophes are word boundaries in this pattern, so
+            # "CAT-like" and "The CAT's meow" are still treated as giveaways.
+            pattern = re.compile(rf"\b{re.escape(answer)}\b")
+            self._patterns[answer] = pattern
+        return pattern
+
     def pick(self, answer: str, rng: random.Random) -> tuple[str, bool] | None:
         """Prefer a hard clue; never return one that gives away its answer."""
+        gives_away = self._giveaway_pattern(answer).search
         for pool, from_hard in ((self._hard.get(answer, []), True),
                                 (self._easy.get(answer, []), False)):
-            usable = [c for c in pool if answer not in c.upper()]
+            usable = [c for c in pool if not gives_away(c.upper())]
             if usable:
                 return rng.choice(usable), from_hard
         return None
