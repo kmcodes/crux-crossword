@@ -48,7 +48,7 @@ class CandidatePool:
         return cls(scores, hard)
 
     def by_length(self, length: int) -> list[str]:
-        return self._covered_by_length.get(length, [])
+        return list(self._covered_by_length.get(length, []))
 
     def score(self, answer: str) -> int:
         return self._scores.get(answer, 0)
@@ -78,7 +78,7 @@ class CandidatePool:
             return []
         known = [(p, c) for p, c in enumerate(pattern) if c != "?"]
         if not known:
-            return words
+            return list(words)
         table = self._index.get(length, {})
         sets = sorted((table.get(k, set()) for k in known), key=len)
         result = set(sets[0])
@@ -86,7 +86,16 @@ class CandidatePool:
             result &= other
             if not result:
                 return []
-        return [words[i] for i in result]
+        # `result` is a set of integer offsets, so its iteration order is
+        # arbitrary and unrelated to `words`' score-descending order (the
+        # bug this fixed). `words` was built score-descending, so offset
+        # ascending == score descending; sorting the (small) matched-offset
+        # set and indexing into `words` restores that order in
+        # O(k log k) on the match count k, rather than an O(n) walk over
+        # the full per-length pool (n can be several thousand while k is
+        # often tens), which kept this on the same hot-path budget as the
+        # pre-fix implementation.
+        return [words[i] for i in sorted(result)]
 
     @staticmethod
     def _matches(answer: str, pattern: str) -> bool:
