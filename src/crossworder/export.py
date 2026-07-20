@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime
 import random
 import sqlite3
+import time
 from pathlib import Path
 
 from crossworder.clue import ClueBank, score_difficulty
@@ -41,7 +42,14 @@ def generate(
     count: int,
     size: int = 15,
     seed: int = 0,
+    max_seconds: float | None = None,
+    pattern_time_budget_s: float = 6.0,
 ) -> int:
+    # Start the overall clock before loading so max_seconds bounds total
+    # wall-clock, not just the generation loop. ClueBank.load reads the full
+    # clue table (~11s), which would otherwise sit outside the cap.
+    deadline = None if max_seconds is None else time.monotonic() + max_seconds
+
     pool = CandidatePool.load(corpus_db)
     bank = ClueBank.load(corpus_db)
     rng = random.Random(seed)
@@ -63,20 +71,39 @@ def generate(
         con.execute("SELECT COALESCE(MAX(id), 0) FROM puzzles").fetchone()[0] + 1
     )
 
+    # Grid patterns already committed to this pack (from this run or an
+    # earlier one) must never be regenerated -- otherwise a rerun or a
+    # resumed overnight build can silently duplicate a puzzle. `used_grids`
+    # is seeded from the pack and then grown in-run as each pattern is
+    # written, so both "already in the pack" and "already used earlier in
+    # this same loop" are covered by one check.
+    used_grids = {
+        row[0] for row in con.execute("SELECT grid FROM puzzles")
+    }
+
     written = 0
     for pattern in patterns:
         if written >= count:
             break
+        if deadline is not None and time.monotonic() >= deadline:
+            break
+        if pattern in used_grids:
+            continue
         # Short per-pattern budget on purpose: roughly half of themeless grids
         # fill almost instantly and the rest can burn minutes. Abandoning a slow
         # pattern and trying the next of ~2,900 is far cheaper than persisting.
+        # Clamp to whatever overall time remains so the max_seconds cap is
+        # honoured tightly rather than overshooting by a full pattern budget.
+        budget = pattern_time_budget_s
+        if deadline is not None:
+            budget = min(budget, max(0.0, deadline - time.monotonic()))
         result = fill_grid(
             pattern,
             size,
             pool,
             seed=rng.randrange(1 << 30),
             max_restarts=4,
-            time_budget_s=15.0,
+            time_budget_s=budget,
         )
         if result is None:
             continue
@@ -110,6 +137,7 @@ def generate(
         )
         con.executemany("INSERT INTO puzzle_clues VALUES (?,?,?,?,?,?,?,?)", rows)
         con.commit()
+        used_grids.add(pattern)
         print(f"wrote puzzle {next_id} (difficulty {difficulty})")
         next_id += 1
         written += 1
