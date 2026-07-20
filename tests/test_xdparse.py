@@ -50,6 +50,42 @@ def test_rejects_non_square_grid():
     assert parse_xd(bad) is None
 
 
+CIRCLE_SAMPLE = """Title: New York Times, Wednesday, May 12, 2004
+Author: Jane Doe
+Editor: Will Shortz
+Special: circle
+Date: 2004-05-12
+
+
+WEDDI
+nGBAN
+D#MOP
+ARTSY
+#EDIT
+
+
+A1. Nuptials, briefly ~ WEDDI
+D1. Marriage jewelry ~ WEDDINGBAND
+A6. Cleaning tool ~ MOP
+"""
+
+
+def test_parses_lowercase_circled_squares_as_uppercase():
+    p = parse_xd(CIRCLE_SAMPLE)
+    assert p is not None
+    assert p.rows[1] == "NGBAN"
+    for row in p.rows:
+        assert row == row.upper()
+
+
+def test_header_line_never_parsed_as_grid_row():
+    p = parse_xd(CIRCLE_SAMPLE)
+    assert p is not None
+    assert "Author: Jane Doe" not in p.rows
+    assert "Special: circle" not in p.rows
+    assert not any(":" in row for row in p.rows)
+
+
 def test_is_hard_only_for_shortz_era_fri_sat():
     p = parse_xd(SAMPLE)
     assert is_hard(p) is True  # 2015-01-03 was a Saturday

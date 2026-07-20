@@ -11,7 +11,11 @@ import re
 from dataclasses import dataclass
 
 CLUE_RE = re.compile(r"^([AD])(\d+)\.\s*(.*?)\s*~\s*(.+)$")
-GRID_ROW_RE = re.compile(r"^[A-Z0-9#_.]+$")
+# Lowercase letters are accepted because xd puzzles with `Special: circle`
+# use lowercase to mark circled squares -- a purely visual annotation. The
+# underlying letter is ordinary and the grid is normalized to uppercase
+# below, so Puzzle.rows is always uppercase A-Z plus '#'.
+GRID_ROW_RE = re.compile(r"^[A-Za-z0-9#_.]+$")
 
 
 @dataclass(frozen=True)
@@ -65,7 +69,7 @@ def parse_xd(text: str) -> Puzzle | None:
                 )
             continue
         if stripped and GRID_ROW_RE.match(stripped) and ":" not in stripped:
-            grid_candidates.append(stripped)
+            grid_candidates.append(stripped.upper())
 
     if not grid_candidates:
         return None
