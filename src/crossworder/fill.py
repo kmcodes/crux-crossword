@@ -164,7 +164,7 @@ def fill_grid(
     size: int,
     pool: CandidatePool,
     seed: int = 0,
-    max_restarts: int = 50,
+    max_restarts: int = 4,
     time_budget_s: float = 60.0,
 ) -> FillResult | None:
     slots = derive_slots(pattern, size)
