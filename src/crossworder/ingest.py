@@ -31,6 +31,32 @@ CREATE TABLE IF NOT EXISTS grids (
 
 CROSSREF_RE = re.compile(r"\b\d+-(Across|Down)\b", re.IGNORECASE)
 
+# The hard-difficulty bank (Shortz-era Fri/Sat) is scoped to NYT puzzles only
+# -- xdparse.is_hard() has no notion of publisher, so that restriction is
+# enforced here structurally, from the file path, so it cannot be bypassed by
+# pointing build_corpus at a broader root. Corpus layout is always
+# <root>/gxd/<publication>/<year>/<file>.xd, so the publication segment is
+# derivable from the path regardless of which root the caller passes.
+NYT_PUBLICATION = "nytimes"
+
+
+def _publication(path: Path) -> str | None:
+    """Return the publication directory name from a corpus-layout path.
+
+    Path is <root>/gxd/<publication>/<year>/<file>.xd; the publication is the
+    path segment immediately following "gxd", found by scanning from the
+    file so it works no matter how far up the tree `root` sits.
+    """
+    parts = path.parts
+    for i, part in enumerate(parts):
+        if part == "gxd" and i + 1 < len(parts):
+            return parts[i + 1]
+    return None
+
+
+def is_nyt(path: Path) -> bool:
+    return _publication(path) == NYT_PUBLICATION
+
 
 def is_usable_clue(text: str) -> bool:
     """Reject clues that cannot survive being moved to a different grid."""
@@ -70,7 +96,10 @@ def build_corpus(puzzle_dir: Path, wordlists: list[Path], db_path: Path) -> None
         puzzle = parse_xd(path.read_text(encoding="utf-8", errors="replace"))
         if puzzle is None:
             continue
-        hard = is_hard(puzzle)
+        # Grid patterns and the hard-clue bank are NYT-only; non-NYT clues
+        # still enter the corpus (as not-hard) since answer frequency across
+        # the full corpus is used as a difficulty signal.
+        hard = is_hard(puzzle) and is_nyt(path)
         for clue in puzzle.clues:
             if not is_usable_clue(clue.text):
                 continue

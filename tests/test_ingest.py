@@ -53,3 +53,62 @@ def test_build_corpus_populates_tables(tmp_path: Path):
     # 2015-01-03 is a Saturday in the Shortz era, so clues are hard.
     assert con.execute("SELECT COUNT(*) FROM clues WHERE is_hard=1").fetchone()[0] == 3
     assert con.execute("SELECT COUNT(*) FROM grids").fetchone()[0] == 1
+
+
+def test_build_corpus_only_marks_nyt_puzzles_as_hard(tmp_path: Path):
+    # Same Shortz-era Saturday grid/clues, ingested once under nytimes and
+    # once under a non-NYT publisher. Only the NYT copy may be hard.
+    nyt_dir = tmp_path / "gxd" / "nytimes" / "2015"
+    nyt_dir.mkdir(parents=True)
+    (nyt_dir / "nyt2015-01-03.xd").write_text(XD)
+
+    other_dir = tmp_path / "gxd" / "latimes" / "2015"
+    other_dir.mkdir(parents=True)
+    (other_dir / "lat2015-01-03.xd").write_text(XD)
+
+    wl = tmp_path / "w.dict"
+    wl.write_text("CAT;80\nACE;60\nTEN;55\n")
+
+    db = tmp_path / "corpus.sqlite"
+    build_corpus(tmp_path, [wl], db)
+
+    con = sqlite3.connect(db)
+    # 3 clues per puzzle x 2 puzzles = 6 total, but only the NYT 3 are hard.
+    assert con.execute("SELECT COUNT(*) FROM clues").fetchone()[0] == 6
+    assert con.execute("SELECT COUNT(*) FROM clues WHERE is_hard=1").fetchone()[0] == 3
+    # Only the NYT puzzle contributes a grid pattern.
+    assert con.execute("SELECT COUNT(*) FROM grids").fetchone()[0] == 1
+
+
+def test_build_corpus_hard_count_identical_regardless_of_root(tmp_path: Path):
+    # Pointing build_corpus at the full multi-publisher tree vs. directly at
+    # the nytimes subdirectory must yield the same hard-clue count -- the
+    # NYT-only restriction must be structural, not a caller convention.
+    nyt_dir = tmp_path / "gxd" / "nytimes" / "2015"
+    nyt_dir.mkdir(parents=True)
+    (nyt_dir / "nyt2015-01-03.xd").write_text(XD)
+
+    other_dir = tmp_path / "gxd" / "latimes" / "2015"
+    other_dir.mkdir(parents=True)
+    (other_dir / "lat2015-01-03.xd").write_text(XD)
+
+    wl = tmp_path / "w.dict"
+    wl.write_text("CAT;80\nACE;60\nTEN;55\n")
+
+    db_full = tmp_path / "corpus_full.sqlite"
+    build_corpus(tmp_path, [wl], db_full)
+
+    db_nyt = tmp_path / "corpus_nyt.sqlite"
+    build_corpus(tmp_path / "gxd" / "nytimes", [wl], db_nyt)
+
+    con_full = sqlite3.connect(db_full)
+    con_nyt = sqlite3.connect(db_nyt)
+
+    hard_full = con_full.execute(
+        "SELECT COUNT(*) FROM clues WHERE is_hard=1"
+    ).fetchone()[0]
+    hard_nyt = con_nyt.execute(
+        "SELECT COUNT(*) FROM clues WHERE is_hard=1"
+    ).fetchone()[0]
+
+    assert hard_full == hard_nyt == 3
